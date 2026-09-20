@@ -36,5 +36,7 @@ lerna-debug.log*
 *.sw?
 
 # Backup / duplicate frontend
-kissan-advisor/
 kissan-advisor-backup/
+
+# Vercel
+.vercel/

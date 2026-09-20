@@ -2,8 +2,9 @@
   "name": "server",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -18,5 +19,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.9.5",
     "openai": "^7.15.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

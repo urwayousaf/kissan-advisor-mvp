@@ -1,0 +1,10 @@
+# Tested with Python 3.12 (TensorFlow has no Python 3.14 wheels; see .python-version).
+tensorflow==2.21.0
+keras==3.15.1
+numpy==2.5.3
+pillow==12.3.0
+fastapi==0.141.1
+uvicorn==0.53.0
+python-multipart==0.0.32
+PyJWT==2.14.0
+python-dotenv==1.2.3

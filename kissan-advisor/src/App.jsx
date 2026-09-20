@@ -483,10 +483,14 @@ function StaffLogin({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const isAdmin = staffRole === "admin";
+
+  // Admin accounts are provisioned on the server; only officers can self-register (with an invite code).
+  const canRegister = !isAdmin;
 
   const roleName = isAdmin
     ? "ایڈمن"
@@ -497,6 +501,7 @@ function StaffLogin({
     setError("");
     setPassword("");
     setConfirmPassword("");
+    setInviteCode("");
   };
 
   const handleSubmit = async (e) => {
@@ -506,7 +511,7 @@ function StaffLogin({
     setError("");
 
     try {
-      if (mode === "register") {
+      if (mode === "register" && canRegister) {
         const cleanName = name.trim();
         const cleanEmail = email.trim().toLowerCase();
 
@@ -524,12 +529,12 @@ function StaffLogin({
           throw new Error("دونوں پاس ورڈ ایک جیسے نہیں ہیں۔");
         }
 
-        const endpoint = isAdmin
-          ? "/auth/admin-register"
-          : "/auth/officer-register";
+        if (!inviteCode.trim()) {
+          throw new Error("براہِ کرم دعوتی کوڈ درج کریں۔");
+        }
 
         const response = await fetch(
-          `${API_URL}${endpoint}`,
+          `${API_URL}/auth/officer-register`,
           {
             method: "POST",
             headers: {
@@ -539,6 +544,7 @@ function StaffLogin({
               name: cleanName,
               email: cleanEmail,
               password,
+              inviteCode: inviteCode.trim(),
             }),
           }
         );
@@ -657,29 +663,29 @@ function StaffLogin({
               ? isAdmin
                 ? "مکمل نظام کی نگرانی اور انتظام کے لیے لاگ اِن کریں۔"
                 : "کسانوں کے فصلوں کے کیسز کا جائزہ لینے کے لیے لاگ اِن کریں۔"
-              : isAdmin
-              ? "نظام کے انتظام کے لیے ایڈمن اکاؤنٹ بنائیں۔"
               : "کسانوں کے کیسز کا جائزہ لینے کے لیے زرعی افسر اکاؤنٹ بنائیں۔"}
           </p>
         </div>
 
-        <div className="auth-switch">
-          <button
-            type="button"
-            className={mode === "login" ? "active" : ""}
-            onClick={() => switchMode("login")}
-          >
-            🔐 لاگ اِن
-          </button>
+        {canRegister && (
+          <div className="auth-switch">
+            <button
+              type="button"
+              className={mode === "login" ? "active" : ""}
+              onClick={() => switchMode("login")}
+            >
+              🔐 لاگ اِن
+            </button>
 
-          <button
-            type="button"
-            className={mode === "register" ? "active" : ""}
-            onClick={() => switchMode("register")}
-          >
-            📝 رجسٹر کریں
-          </button>
-        </div>
+            <button
+              type="button"
+              className={mode === "register" ? "active" : ""}
+              onClick={() => switchMode("register")}
+            >
+              📝 رجسٹر کریں
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="error-message">
@@ -698,11 +704,7 @@ function StaffLogin({
                 id="staff-name"
                 name="name"
                 type="text"
-                placeholder={
-                  isAdmin
-                    ? "مثلاً سسٹم ایڈمنسٹریٹر"
-                    : "مثلاً محمد علی"
-                }
+                placeholder="مثلاً محمد علی"
                 value={name}
                 onChange={(e) =>
                   setName(e.target.value)
@@ -786,6 +788,27 @@ function StaffLogin({
             </div>
           )}
 
+          {mode === "register" && (
+            <div className="form-group">
+              <label htmlFor="staff-invite-code">
+                دعوتی کوڈ
+              </label>
+
+              <input
+                id="staff-invite-code"
+                name="inviteCode"
+                type="password"
+                placeholder="محکمہ زراعت کی طرف سے دیا گیا کوڈ"
+                value={inviteCode}
+                onChange={(e) =>
+                  setInviteCode(e.target.value)
+                }
+                autoComplete="off"
+                required
+              />
+            </div>
+          )}
+
           <button
             type="submit"
             className="primary-btn full-width"
@@ -797,12 +820,11 @@ function StaffLogin({
               ? isAdmin
                 ? "⚙️ ایڈمن کے طور پر لاگ اِن کریں"
                 : "👨‍🌾 افسر کے طور پر لاگ اِن کریں"
-              : isAdmin
-              ? "⚙️ ایڈمن اکاؤنٹ بنائیں"
               : "👨‍🌾 افسر اکاؤنٹ بنائیں"}
           </button>
         </form>
 
+        {canRegister && (
         <div className="auth-switch">
           {mode === "login" ? (
             <>
@@ -836,6 +858,7 @@ function StaffLogin({
             </>
           )}
         </div>
+        )}
 
         <button
           type="button"
@@ -3642,6 +3665,9 @@ function App() {
             `${AI_URL}/predict`,
             {
               method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
               body: formDataAI,
             }
           );

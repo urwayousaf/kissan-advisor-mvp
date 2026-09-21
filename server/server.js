@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -8,6 +9,8 @@ const jwt = require("jsonwebtoken");
 const OpenAI = require("openai");
 
 const app = express();
+
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 const PORT = process.env.PORT || 5000;
 
@@ -21,13 +24,42 @@ const ALLOWED_ORIGINS = [
     .filter(Boolean),
 ];
 
+// No fallback in production: a missing config value must stop the server,
+// not silently point it at localhost or a publicly known secret.
+if (IS_PRODUCTION) {
+  for (const name of ["MONGO_URL", "JWT_SECRET"]) {
+    if (!process.env[name]) {
+      console.error(`FATAL: ${name} must be set when NODE_ENV=production.`);
+      process.exit(1);
+    }
+  }
+}
+
 const MONGO_URL =
   process.env.MONGO_URL ||
   "mongodb://127.0.0.1:27017/kissanAdvisor";
 
+// Outside production, a missing secret becomes a random per-process one
+// (sessions reset on restart). It is never a known constant.
 const JWT_SECRET =
   process.env.JWT_SECRET ||
-  "kissan-advisor-secret-key";
+  crypto.randomBytes(48).toString("hex");
+
+if (!process.env.JWT_SECRET) {
+  console.warn(
+    "WARNING: JWT_SECRET is not set. Using a temporary random secret; logins will not survive a restart."
+  );
+}
+
+// Shared code that lets an agriculture officer self-register. Unset = registration disabled.
+const OFFICER_INVITE_CODE = process.env.OFFICER_INVITE_CODE || "";
+
+function safeEqual(a, b) {
+  const hash = (value) =>
+    crypto.createHash("sha256").update(String(value)).digest();
+
+  return crypto.timingSafeEqual(hash(a), hash(b));
+}
 
 /* =====================================================
    OPENAI
@@ -76,6 +108,9 @@ mongoose
       "MongoDB connection error:",
       error.message
     );
+
+    // Serving requests without a database only produces 500s; let the host restart us.
+    process.exit(1);
   });
 
 /* =====================================================
@@ -842,11 +877,36 @@ app.post(
 
     try {
 
+      if (!OFFICER_INVITE_CODE) {
+
+        return res.status(403).json({
+          success: false,
+          message:
+            "Officer registration is disabled.",
+        });
+      }
+
       const {
         name,
         email,
         password,
+        inviteCode,
       } = req.body;
+
+      if (
+        typeof inviteCode !== "string" ||
+        !safeEqual(
+          inviteCode,
+          OFFICER_INVITE_CODE
+        )
+      ) {
+
+        return res.status(403).json({
+          success: false,
+          message:
+            "Invalid invite code.",
+        });
+      }
 
       if (
         !name ||
@@ -950,129 +1010,6 @@ app.post(
         success: false,
         message:
           "Officer registration failed.",
-      });
-    }
-  }
-);
-
-/* =====================================================
-   REGISTER ADMIN
-===================================================== */
-
-app.post(
-  "/api/auth/admin-register",
-  async (req, res) => {
-
-    try {
-
-      const {
-        name,
-        email,
-        password,
-      } = req.body;
-
-      if (
-        !name ||
-        !email ||
-        !password
-      ) {
-
-        return res.status(400).json({
-          success: false,
-          message:
-            "Name, email and password are required.",
-        });
-      }
-
-      if (
-        password.length < 6
-      ) {
-
-        return res.status(400).json({
-          success: false,
-          message:
-            "Password must be at least 6 characters.",
-        });
-      }
-
-      const cleanEmail =
-        email
-          .trim()
-          .toLowerCase();
-
-      const existingUser =
-        await User.findOne({
-          email:
-            cleanEmail,
-        });
-
-      if (existingUser) {
-
-        return res.status(400).json({
-          success: false,
-          message:
-            "An account with this email already exists.",
-        });
-      }
-
-      const hashedPassword =
-        await bcrypt.hash(
-          password,
-          10
-        );
-
-      const admin =
-        await User.create({
-
-          name:
-            name.trim(),
-
-          email:
-            cleanEmail,
-
-          password:
-            hashedPassword,
-
-          role:
-            "admin",
-        });
-
-      const token =
-        createToken(admin);
-
-      return res.status(201).json({
-
-        success: true,
-
-        message:
-          "Admin account created successfully.",
-
-        token,
-
-        user: {
-          id:
-            admin._id,
-          name:
-            admin.name,
-          email:
-            admin.email,
-          role:
-            admin.role,
-        },
-
-      });
-
-    } catch (error) {
-
-      console.error(
-        "Admin registration error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Admin registration failed.",
       });
     }
   }
@@ -1734,57 +1671,75 @@ app.put(
 );
 
 /* =====================================================
-   TEST OFFICER
+   ADMIN SEED
 ===================================================== */
 
-async function createTestOfficer() {
+// Admin accounts cannot be created through the API. Set ADMIN_EMAIL and
+// ADMIN_PASSWORD to create the first admin at startup (existing accounts are left untouched).
+async function seedAdmin() {
+
+  const email =
+    (process.env.ADMIN_EMAIL || "")
+      .trim()
+      .toLowerCase();
+
+  const password =
+    process.env.ADMIN_PASSWORD || "";
+
+  if (!email && !password) {
+    return;
+  }
 
   try {
 
-    const existingOfficer =
-      await User.findOne({
-        email:
-          "officer@kissanadvisor.com",
-      });
+    if (!email || password.length < 8) {
 
-    if (existingOfficer) {
-
-      console.log(
-        "Test officer account already exists."
+      console.error(
+        "Admin seed skipped: ADMIN_EMAIL is required and ADMIN_PASSWORD must be at least 8 characters."
       );
 
       return;
     }
 
-    const hashedPassword =
-      await bcrypt.hash(
-        "Officer123",
-        10
+    const existingUser =
+      await User.findOne({ email });
+
+    if (existingUser) {
+
+      console.log(
+        existingUser.role === "admin"
+          ? "Admin account already exists."
+          : "Admin seed skipped: ADMIN_EMAIL belongs to a non-admin account."
       );
+
+      return;
+    }
 
     await User.create({
 
       name:
-        "Agriculture Officer",
+        "Administrator",
 
-      email:
-        "officer@kissanadvisor.com",
+      email,
 
       password:
-        hashedPassword,
+        await bcrypt.hash(
+          password,
+          10
+        ),
 
       role:
-        "officer",
+        "admin",
     });
 
     console.log(
-      "Test officer account created successfully."
+      "Admin account created successfully."
     );
 
   } catch (error) {
 
     console.error(
-      "Officer account creation error:",
+      "Admin seed error:",
       error.message
     );
   }
@@ -1841,6 +1796,6 @@ app.listen(
       );
     }
 
-    await createTestOfficer();
+    await seedAdmin();
   }
 );
